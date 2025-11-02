@@ -1,6 +1,7 @@
 # CityLearn utils
 from citylearn.data import DataSet
 from citylearn.wrappers import StableBaselines3Wrapper
+from citylearn.citylearn import CityLearnEnv
 
 # Logging
 import wandb
@@ -10,6 +11,11 @@ from stable_baselines3.common.callbacks import BaseCallback
 import argparse
 from collections import deque
 from typing import Any, List, Tuple, Dict
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import math
+import os
 
 
 class Config:
@@ -185,3 +191,116 @@ def default_env_config(dataset: int) -> Dict[str, Any]:
         schema['buildings'][build]['include'] = (build == 'Building_1')
 
     return schema
+
+def get_kpis(env: CityLearnEnv) -> pd.DataFrame:
+    """Returns evaluation KPIs.
+
+    Electricity cost and carbon emissions KPIs are provided
+    at the building-level and average district-level. Average daily peak,
+    ramping and (1 - load factor) KPIs are provided at the district level.
+
+    Parameters
+    ----------
+    env: CityLearnEnv
+        CityLearn environment instance.
+
+    Returns
+    -------
+    kpis: pd.DataFrame
+        KPI table.
+    """
+
+    kpis = env.unwrapped.evaluate()
+
+    # names of KPIs to retrieve from evaluate function
+    kpi_names = {
+        'cost_total': 'Cost',
+        'carbon_emissions_total': 'Emissions',
+        'daily_peak_average': 'Avg. daily peak',
+        'ramping_average': 'Ramping',
+        'monthly_one_minus_load_factor_average': '1 - load factor',
+        'discomfort_proportion': 'Discomfort'
+    }
+    kpis = kpis[
+        (kpis['cost_function'].isin(kpi_names))
+    ].dropna()
+    kpis['cost_function'] = kpis['cost_function'].map(lambda x: kpi_names[x])
+
+    # round up the values to 2 decimal places for readability
+    kpis['value'] = kpis['value'].round(2)
+
+    # rename the column that defines the KPIs
+    kpis = kpis.rename(columns={'cost_function': 'kpi'})
+
+    return kpis
+
+def plot_district_kpis(envs: dict[str, CityLearnEnv], base_path: str) -> None:
+    """Plots electricity consumption, cost, carbon emissions,
+    average daily peak, ramping and (1 - load factor) at the
+    district-level for different control agents in a bar chart.
+
+    Parameters
+    ----------
+    envs: dict[str, CityLearnEnv]
+        Mapping of user-defined control agent names to environments
+        the agents have been used to control.
+
+    base_path: str
+            Path to save the figure.
+    Returns
+    -------
+    None
+    """
+
+    kpis_list = []
+
+    for k, v in envs.items():
+        kpis = get_kpis(v)
+        kpis = kpis[kpis['level']=='district'].copy()
+        kpis['env_id'] = k
+        kpis_list.append(kpis)
+
+    kpis = pd.concat(kpis_list, ignore_index=True, sort=False)
+    kpi_names= kpis['kpi'].unique()
+    column_count_limit = 3
+    row_count = math.ceil(len(kpi_names)/column_count_limit)
+    column_count = min(column_count_limit, len(kpi_names))
+
+    # Calculate figure size - adjusted for better proportions
+    figsize = (6*column_count, 3.5*row_count)
+    
+    fig, _ = plt.subplots(
+        row_count, column_count, figsize=figsize
+    )
+
+    # Add figure title
+    fig.suptitle('District KPIs', fontsize=16, fontweight='bold')
+
+    for i, (ax, (k, k_data)) in enumerate(zip(fig.axes, kpis.groupby('kpi'))):
+        sns.barplot(x='value', y='name', data=k_data, hue='env_id', ax=ax)
+
+        ax.set_xlabel(None)
+        ax.set_ylabel(None)
+        ax.set_yticklabels([])  # Remove y-axis tick labels
+        ax.set_title(k)
+
+        for j in range(len(ax.containers)):
+            ax.bar_label(ax.containers[j], fmt='%.2f')
+
+        # Add dashed vertical line at x=1
+        ax.axvline(x=1, color='gray', linestyle='--', linewidth=1.5, label='No Control')
+
+        if i == len(kpi_names) - 1:
+            ax.legend(
+                loc='upper left', bbox_to_anchor=(1.3, 1.0), framealpha=0.0
+            )
+        else:
+            ax.legend().set_visible(False)
+
+        for s in ['right','top']:
+            ax.spines[s].set_visible(False)
+
+    plt.tight_layout()
+    os.makedirs(base_path, exist_ok=True)
+    plt.savefig(f'{base_path}/district_kpis.png', bbox_inches='tight')
+    plt.close()

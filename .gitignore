@@ -1,0 +1,23 @@
+# PyCache
+**/__pycache__/*
+
+# Omnisafe runs
+**/runs/*
+
+# Wandb logs
+**/wandb/*
+
+# CityLearn renders
+**/render/*
+
+# Images
+**/imgs/*
+
+# VSCode settings
+**/.vscode/*
+
+# Build files
+**/build/*
+
+# Distribution files
+**/*.egg-info/*

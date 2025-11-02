@@ -29,7 +29,7 @@ pip install -e .
 4. Additional requirements
 ```console
 # Progress bar visualization
-pip install ipwidgets
+pip install ipywidgets
 
 # SB3 comparison
 pip install stable-baselines3==2.0.0
